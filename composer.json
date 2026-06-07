@@ -1,0 +1,32 @@
+{
+  "name": "fakturovo/api-client",
+  "description": "Official PHP client library for the Fakturovo public API – invoices, proforma invoices, credit notes & payments.",
+  "keywords": ["fakturovo", "api", "client", "invoices", "proforma", "credit-notes", "payments", "php"],
+  "homepage": "https://fakturovo.sk",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Tomas Sofranko",
+      "email": "services@fakturovo.sk"
+    }
+  ],
+  "support": {
+    "issues": "https://github.com/Fakturovo/fakturovo-api-client/issues",
+    "source": "https://github.com/Fakturovo/fakturovo-api-client"
+  },
+  "require": {
+    "php": "^8.0",
+    "guzzlehttp/guzzle": "^7.9",
+    "nyholm/psr7": "^1.8",
+    "psr/http-client": "^1.0",
+    "psr/http-factory": "^1.1",
+    "psr/log": "^3.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Fakturovo\\ApiClient\\": "src/"
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true
+}
