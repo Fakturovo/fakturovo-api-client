@@ -357,7 +357,7 @@ $api->invoiceRepository->createInvoice([
     'appearance'   => [
         'logo_url' => 'https://eshop-a.example/logo.png', // fetched & cached server-side
         'color'    => '#0AB1C2',                          // accent colour, #RRGGBB
-        'template' => 'style',                            // basic | style | mono
+        'template' => 'modern',                           // standard | modern | mono
         'language' => 'EN',                               // SK | EN | CZ
     ],
 ]);
@@ -367,7 +367,7 @@ $api->invoiceRepository->createInvoice([
 |--------------------|------|-------|
 | `logo_url` | string (url) | Downloaded and cached on the server; must be a PNG/JPG/GIF/WEBP/SVG ≤ 5 MB. `null` clears the override. |
 | `color` | string | Accent colour as `#RRGGBB`. |
-| `template` | string | `basic`, `style`, `mono`. |
+| `template` | string | `standard`, `modern`, `mono`. |
 | `language` | string | `SK`, `EN`, `CZ` (document language). |
 
 Updating `appearance` via `updateInvoice()` / `updateProformaInvoice()` / `updateCreditNote()`
