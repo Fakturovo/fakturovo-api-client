@@ -29,4 +29,12 @@ final class AccountRepository extends AbstractRepository implements AccountRepos
             throw AccountException::failedToGetMe($e);
         }
     }
+
+    public function getSubscription(): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_GET, '/v1/subscription'),
+            fn (\Throwable $e) => AccountException::failed('get subscription', $e),
+        );
+    }
 }

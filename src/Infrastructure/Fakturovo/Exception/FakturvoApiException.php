@@ -18,5 +18,9 @@ class FakturvoApiException extends RuntimeException
     ) {
         parent::__construct($message, $code, $previous);
     }
-}
 
+    public static function failed(string $action, \Throwable $previous): static
+    {
+        return new static("Failed to {$action}: {$previous->getMessage()}", (int) $previous->getCode(), $previous);
+    }
+}

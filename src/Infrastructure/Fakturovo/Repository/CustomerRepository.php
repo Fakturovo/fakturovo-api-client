@@ -103,4 +103,12 @@ final class CustomerRepository extends AbstractRepository implements CustomerRep
             throw CustomerException::failedToDelete($id, $e);
         }
     }
+
+    public function getCustomerCategories(): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_GET, '/v1/customers/categories'),
+            fn (\Throwable $e) => CustomerException::failed('list customer categories', $e),
+        );
+    }
 }

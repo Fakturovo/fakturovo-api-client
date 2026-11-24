@@ -77,4 +77,26 @@ interface InvoiceRepositoryInterface
      * @param array<string, mixed> $data Optional: amount (omit to pay in full), paid_at (Y-m-d), note
      */
     public function markInvoiceAsPaid(int $id, array $data = []): DomainResponseInterface;
+
+    /**
+     * Send the invoice the way the app does: by e-mail when the customer has an address and via
+     * Peppol when the branch has Peppol enabled. Pass channels to pick explicitly. A scheduled
+     * invoice is issued immediately.
+     *
+     * @param list<string>|null $channels 'email' and/or 'peppol'; null = automatic
+     * @see https://api.fakturovo.sk/docs/api#/operations/invoices.sendInvoice
+     */
+    public function sendInvoice(int $id, ?array $channels = null): DomainResponseInterface;
+
+    /**
+     * Send the invoice via Peppol only. 422 when Peppol is not enabled, 409 when already submitted.
+     * @see https://api.fakturovo.sk/docs/api#/operations/invoices.sendInvoiceToPeppol
+     */
+    public function sendInvoiceToPeppol(int $id): DomainResponseInterface;
+
+    /**
+     * Peppol delivery evidence (receipts) of the invoice with short-lived download URLs.
+     * @see https://api.fakturovo.sk/docs/api#/operations/invoices.getInvoicePeppolEvidence
+     */
+    public function getInvoicePeppolEvidence(int $id): DomainResponseInterface;
 }

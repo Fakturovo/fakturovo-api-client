@@ -15,7 +15,7 @@
     "source": "https://github.com/Fakturovo/fakturovo-api-client"
   },
   "require": {
-    "php": "^8.0",
+    "php": "^8.1",
     "guzzlehttp/guzzle": "^7.9",
     "nyholm/psr7": "^1.8",
     "psr/http-client": "^1.0",

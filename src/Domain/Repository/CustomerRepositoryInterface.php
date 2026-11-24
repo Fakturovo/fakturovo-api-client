@@ -49,4 +49,10 @@ interface CustomerRepositoryInterface
      * @see https://api.fakturovo.sk/docs/api#/operations/customers.deleteCustomer
      */
     public function deleteCustomer(int $id): DomainResponseInterface;
+
+    /**
+     * Categories used on customers.
+     * @see https://api.fakturovo.sk/docs/api#/operations/customers.getCustomerCategories
+     */
+    public function getCustomerCategories(): DomainResponseInterface;
 }

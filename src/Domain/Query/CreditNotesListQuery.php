@@ -15,6 +15,9 @@ final class CreditNotesListQuery
         public ?string $sort = null,
         public ?int $perPage = null,
         public ?int $page = null,
+        public ?string $direction = null,
+        public ?string $foreignId = null,
+        public ?string $foreignSource = null,
     ) {
     }
 
@@ -30,6 +33,9 @@ final class CreditNotesListQuery
             'sort' => $this->sort,
             'per_page' => $this->perPage,
             'page' => $this->page,
+            'direction' => $this->direction,
+            'foreign_id' => $this->foreignId,
+            'foreign_source' => $this->foreignSource,
         ], fn (mixed $v) => $v !== null);
     }
 }

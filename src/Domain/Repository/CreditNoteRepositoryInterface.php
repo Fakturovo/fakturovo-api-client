@@ -51,10 +51,41 @@ interface CreditNoteRepositoryInterface
     public function deleteCreditNote(int $id): DomainResponseInterface;
 
     /**
-     * Download credit note PDF.
+     * Download credit note PDF (body: ['content' => bytes, 'content_type' => 'application/pdf']).
+     *
+     * PDFs are generated asynchronously. For a document created in the last few seconds the API
+     * waits up to ~3 seconds for the file; if it is still not ready it answers 404. Check the
+     * `pdf_ready` flag on the credit note resource and retry later.
      *
      * @param string|null $language Optional language override (SK, EN, CZ).
      * @see https://api.fakturovo.sk/docs/api#/operations/creditNotes.getCreditNotePdf
      */
     public function getCreditNotePdf(int $id, ?string $language = null): DomainResponseInterface;
+
+    /**
+     * Send the credit note the way the app does: by e-mail when the customer has an address and via
+     * Peppol when the branch has Peppol enabled. Pass channels to pick explicitly.
+     *
+     * @param list<string>|null $channels 'email' and/or 'peppol'; null = automatic
+     * @see https://api.fakturovo.sk/docs/api#/operations/creditNotes.sendCreditNote
+     */
+    public function sendCreditNote(int $id, ?array $channels = null): DomainResponseInterface;
+
+    /**
+     * E-mail the credit note to the customer.
+     * @see https://api.fakturovo.sk/docs/api#/operations/creditNotes.sendCreditNoteEmail
+     */
+    public function sendCreditNoteEmail(int $id): DomainResponseInterface;
+
+    /**
+     * Send the credit note via Peppol only. 422 when Peppol is not enabled, 409 when already submitted or received.
+     * @see https://api.fakturovo.sk/docs/api#/operations/creditNotes.sendCreditNoteToPeppol
+     */
+    public function sendCreditNoteToPeppol(int $id): DomainResponseInterface;
+
+    /**
+     * Peppol delivery evidence (receipts) of the credit note.
+     * @see https://api.fakturovo.sk/docs/api#/operations/creditNotes.getCreditNotePeppolEvidence
+     */
+    public function getCreditNotePeppolEvidence(int $id): DomainResponseInterface;
 }

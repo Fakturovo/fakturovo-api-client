@@ -33,4 +33,20 @@ final class NumberSeriesRepository extends AbstractRepository implements NumberS
             throw NumberSeriesException::failedToList($e);
         }
     }
+
+    public function createNumberSeries(array $data): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_POST, '/v1/number-series', $data),
+            fn (\Throwable $e) => NumberSeriesException::failed('create number series', $e),
+        );
+    }
+
+    public function updateNumberSeries(int $id, array $data): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_PATCH, '/v1/number-series/' . $id, $data),
+            fn (\Throwable $e) => NumberSeriesException::failed("update number series [{$id}]", $e),
+        );
+    }
 }

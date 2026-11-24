@@ -37,4 +37,16 @@ interface ExpenseRepositoryInterface
      * Delete an expense.
      */
     public function deleteExpense(int $id): DomainResponseInterface;
+
+    /**
+     * Peppol evidence of an expense received via Peppol.
+     * @see https://api.fakturovo.sk/docs/api#/operations/expenses.getExpensePeppolEvidence
+     */
+    public function getExpensePeppolEvidence(int $id): DomainResponseInterface;
+
+    /**
+     * Categories used on expenses.
+     * @see https://api.fakturovo.sk/docs/api#/operations/expenses.getExpenseCategories
+     */
+    public function getExpenseCategories(): DomainResponseInterface;
 }

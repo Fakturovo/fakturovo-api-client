@@ -12,6 +12,9 @@ use Psr\Log\LoggerInterface;
 
 final class RetryableHttpClient implements ClientInterface
 {
+    private const MAX_RETRY_AFTER_SECONDS = 60;
+    private const QUOTA_EXCEEDED = 'quota_exceeded';
+
     private ClientInterface $inner;
     private int $maxRetries;
     private ?LoggerInterface $logger;
@@ -43,7 +46,7 @@ final class RetryableHttpClient implements ClientInterface
         while (true) {
             $response = $this->inner->sendRequest($request);
 
-            if ($response->getStatusCode() !== 429 || $attempt >= $this->maxRetries) {
+            if (!$this->isRetryableRateLimit($response) || $attempt >= $this->maxRetries) {
                 if ($response->getStatusCode() >= 400 && $this->logger !== null) {
                     $this->logger->warning('Fakturovo API error response', [
                         'status' => $response->getStatusCode(),
@@ -68,5 +71,30 @@ final class RetryableHttpClient implements ClientInterface
 
             sleep($retryAfter);
         }
+    }
+
+    /**
+     * Only the short per-minute burst limit is worth waiting for. The monthly plan quota
+     * (error: quota_exceeded) or a Retry-After longer than a minute is returned immediately.
+     */
+    private function isRetryableRateLimit(ResponseInterface $response): bool
+    {
+        if ($response->getStatusCode() !== 429) {
+            return false;
+        }
+
+        if ((int) $response->getHeaderLine('Retry-After') > self::MAX_RETRY_AFTER_SECONDS) {
+            return false;
+        }
+
+        $body = $response->getBody();
+        $content = $body->getContents();
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+
+        $decoded = json_decode($content, true);
+
+        return !is_array($decoded) || ($decoded['error'] ?? null) !== self::QUOTA_EXCEEDED;
     }
 }

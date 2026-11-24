@@ -13,7 +13,7 @@ Official PHP wrapper for the **Fakturovo public REST API**.
 
 ## Requirements
 
-- PHP **8.0+**
+- PHP **8.1+**
 - [Composer](https://getcomposer.org)
 
 ## Installation
@@ -94,14 +94,59 @@ $options = new ClientOptions(
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `uri` | `Uri` | — (required) | Target server. `Uri::FAKTUROVO_SK()` |
+| `uri` | `Uri` | — (required) | Target server. `Uri::FAKTUROVO_SK()`, or `Uri::custom('https://…/api/public')` for staging / local |
 | `timeoutSeconds` | `int` | `30` | HTTP request timeout in seconds |
 | `maxRetries` | `int` | `3` | Maximum retries when rate-limited (HTTP 429) |
 | `logger` | `?LoggerInterface` | `null` | PSR-3 logger for request/response diagnostics |
 
 ### Retry behaviour
 
-When the API responds with **HTTP 429 Too Many Requests**, the client reads the `Retry-After` response header, sleeps for the specified number of seconds, and retries. Retries continue up to `maxRetries` before propagating the response. All retry events are logged at `INFO` level if a logger is configured.
+When the API responds with **HTTP 429** because of the **per-minute burst limit** (`error: rate_limited`),
+the client reads the `Retry-After` header, sleeps and retries — up to `maxRetries` times, then
+returns the 429 response. Retry events are logged at `INFO` level if a logger is configured.
+
+The **monthly plan quota** (`error: quota_exceeded`) is never retried: the client throws
+`QuotaExceededException` right away (see [Rate limits & plan quotas](#rate-limits--plan-quotas)).
+
+---
+
+## Rate limits & plan quotas
+
+| Limit | Scope | Value | Headers |
+|---|---|---|---|
+| Burst | per token | 60 requests / minute | `X-RateLimit-Limit`, `X-RateLimit-Remaining` |
+| Monthly quota | per account (all tokens) | Free 100 · Lite 500 · Plus 5 000 · Premium unlimited | `X-Quota-Limit`, `X-Quota-Remaining`, `X-Quota-Reset` |
+
+Every response exposes the current state:
+
+```php
+$response = $api->invoiceRepository->getInvoices();
+$limit = $response->getRateLimit();
+
+$limit->remaining;       // requests left this minute
+$limit->quotaRemaining;  // requests left this month (null on unlimited plans)
+$limit->quotaResetsAt;   // DateTimeImmutable, 1st of next month
+```
+
+```php
+use Fakturovo\ApiClient\Infrastructure\Fakturovo\Exception\QuotaExceededException;
+
+try {
+    $api->invoiceRepository->getInvoices();
+} catch (QuotaExceededException $e) {
+    // $e->limit, $e->used, $e->resetsAt — upgrade the plan or wait for the reset
+}
+```
+
+Plan features are enforced exactly as in the app. Features outside the account's plan answer
+`403` with `error: plan_required` and the `feature` key: credit notes (all endpoints); creating,
+changing, paying or converting proforma invoices; creating, changing, sending or changing the
+status of estimates; creating or changing catalogue items; creating, changing or activating
+recurring invoices (reading, deleting and stopping stay allowed, like in the app); creating expenses and number series; creating a second bank account; sending invoices and credit notes by email
+(`send-email` or `channels: ['email']`); per-document `appearance` (custom invoice design); and
+`linked_documents`. Plan limits answer `402` with `code: limit_reached` — invoices per month
+(creating an invoice or converting a proforma). `$api->accountRepository->getSubscription()` shows the plan, its features
+and current usage.
 
 ---
 
@@ -109,15 +154,19 @@ When the API responds with **HTTP 429 Too Many Requests**, the client reads the 
 
 Base URL: `https://api.fakturovo.sk/api/public`
 
-Each method returns a `DomainResponseInterface` (`getStatusCode()`, `getBody()`, `isSuccessful()`).
+Each method returns a `DomainResponseInterface` (`getStatusCode()`, `getBody()`, `isSuccessful()`,
+`getHeaderLine()`, `getRateLimit()`). PDF and attachment downloads return
+`['content' => <bytes>, 'content_type' => …]` as the body; `DELETE` calls return `204` with an empty body.
 
 ### Account / connection check – `$api->accountRepository`
 
 | Method | HTTP | Endpoint |
 |--------|------|----------|
 | `me()` | GET | `/v1/me` |
+| `getSubscription()` | GET | `/v1/subscription` |
 
-Verifies the API token and returns the branch, token info and effective scopes. Works with any
+`me()` verifies the API token and returns the company, branch (incl. Peppol status), the user who
+created the token, token info, effective scopes, the subscription plan and API quota usage. Works with any
 valid token regardless of its scopes — ideal for a "Verify connection" button.
 
 ```php
@@ -140,6 +189,10 @@ if ($response->isSuccessful()) {
 | `createCustomer(array $data)` | POST | `/v1/customers` |
 | `updateCustomer(int $id, array $data)` | PATCH | `/v1/customers/{id}` |
 | `deleteCustomer(int $id)` | DELETE | `/v1/customers/{id}` |
+| `getCustomerCategories()` | GET | `/v1/customers/categories` |
+
+Customers accept `peppol_participant` (e.g. `0245:2020202020`) to override the Peppol ID that is
+otherwise derived from the DIČ.
 
 ### Invoices – `$api->invoiceRepository`
 
@@ -154,6 +207,45 @@ if ($response->isSuccessful()) {
 | `sendInvoiceEmail(int $id, array $data)` | POST | `/v1/invoices/{id}/send-email` |
 | `markInvoiceAsSent(int $id)` | POST | `/v1/invoices/{id}/mark-as-sent` |
 | `markInvoiceAsPaid(int $id, array $data)` | POST | `/v1/invoices/{id}/mark-as-paid` |
+| `sendInvoice(int $id, ?array $channels)` | POST | `/v1/invoices/{id}/send` |
+| `sendInvoiceToPeppol(int $id)` | POST | `/v1/invoices/{id}/send-to-peppol` |
+| `getInvoicePeppolEvidence(int $id)` | GET | `/v1/invoices/{id}/peppol-evidence` |
+
+### Invoice repeaters – `$api->invoiceRepeaterRepository`
+
+| Method | HTTP | Endpoint |
+|--------|------|----------|
+| `getInvoiceRepeaters(InvoiceRepeatersListQuery $query)` | GET | `/v1/invoice-repeaters` |
+| `getInvoiceRepeater(int $id)` | GET | `/v1/invoice-repeaters/{id}` |
+| `createInvoiceRepeater(array $data)` | POST | `/v1/invoice-repeaters` |
+| `updateInvoiceRepeater(int $id, array $data)` | PATCH | `/v1/invoice-repeaters/{id}` |
+| `deleteInvoiceRepeater(int $id)` | DELETE | `/v1/invoice-repeaters/{id}` |
+| `stopInvoiceRepeater(int $id)` | POST | `/v1/invoice-repeaters/{id}/stop` |
+| `activateInvoiceRepeater(int $id)` | POST | `/v1/invoice-repeaters/{id}/activate` |
+
+A repeater periodically generates a real invoice (e.g. monthly recurring billing). `customer`,
+`items`, `payment_form`, `due_days`, `active`, `interval` and `start_at` are required on create;
+`updateInvoiceRepeater` accepts the same fields as a partial payload. Invoices generated from a
+repeater expose `"type": "automatic"` (vs `"manual"` for everything else) on the invoice
+resource — see [Invoice type](#invoice-type) below.
+
+```php
+$response = $api->invoiceRepeaterRepository->createInvoiceRepeater([
+    'customer'     => ['id' => 123],
+    'payment_form' => 'bank_transfer',
+    'due_days'     => 14,
+    'active'       => true,
+    'interval'     => 'monthly',
+    'start_at'     => '2026-01-01',
+    'items'        => [
+        ['name' => 'Hosting', 'quantity' => 1, 'price' => 20.00, 'vat_amount' => 20],
+    ],
+]);
+
+// Pause / resume without deleting
+$api->invoiceRepeaterRepository->stopInvoiceRepeater($id);
+$api->invoiceRepeaterRepository->activateInvoiceRepeater($id);
+```
 
 ### Proforma invoices – `$api->proformaInvoiceRepository`
 
@@ -177,6 +269,13 @@ if ($response->isSuccessful()) {
 | `updateCreditNote(int $id, array $data)` | PATCH | `/v1/credit-notes/{id}` |
 | `deleteCreditNote(int $id)` | DELETE | `/v1/credit-notes/{id}` |
 | `getCreditNotePdf(int $id, ?string $language)` | GET | `/v1/credit-notes/{id}/pdf` |
+| `sendCreditNote(int $id, ?array $channels)` | POST | `/v1/credit-notes/{id}/send` |
+| `sendCreditNoteEmail(int $id)` | POST | `/v1/credit-notes/{id}/send-email` |
+| `sendCreditNoteToPeppol(int $id)` | POST | `/v1/credit-notes/{id}/send-to-peppol` |
+| `getCreditNotePeppolEvidence(int $id)` | GET | `/v1/credit-notes/{id}/peppol-evidence` |
+
+`CreditNotesListQuery(direction: 'received')` lists credit notes received from suppliers via Peppol
+(issued ones are the default).
 
 ### Expenses – `$api->expenseRepository`
 
@@ -187,6 +286,10 @@ if ($response->isSuccessful()) {
 | `createExpense(array $data)` | POST | `/v1/expenses` |
 | `updateExpense(int $id, array $data)` | PATCH | `/v1/expenses/{id}` |
 | `deleteExpense(int $id)` | DELETE | `/v1/expenses/{id}` |
+| `getExpensePeppolEvidence(int $id)` | GET | `/v1/expenses/{id}/peppol-evidence` |
+| `getExpenseCategories()` | GET | `/v1/expenses/categories` |
+
+`ExpensesListQuery(type: 'peppol')` lists expenses received via Peppol (`manual`, `peppol`, `ai`).
 
 ### Bank accounts – `$api->bankAccountRepository`
 
@@ -203,8 +306,10 @@ if ($response->isSuccessful()) {
 | Method | HTTP | Endpoint |
 |--------|------|----------|
 | `getNumberSeries(NumberSeriesListQuery $query)` | GET | `/v1/number-series` |
+| `createNumberSeries(array $data)` | POST | `/v1/number-series` |
+| `updateNumberSeries(int $id, array $data)` | PATCH | `/v1/number-series/{id}` |
 
-Read-only. Optionally filter by document type: `invoice`, `proforma_invoice`, `credit_note`.
+Optionally filter by document type: `invoice`, `proforma_invoice`, `credit_note`, `estimate`.
 
 ```php
 use Fakturovo\ApiClient\Domain\Query\NumberSeriesListQuery;
@@ -215,6 +320,60 @@ $api->numberSeriesRepository->getNumberSeries();
 // Only invoice number series
 $api->numberSeriesRepository->getNumberSeries(new NumberSeriesListQuery(type: 'invoice'));
 ```
+
+### Payments – `$api->paymentRepository`
+
+| Method | HTTP | Endpoint |
+|--------|------|----------|
+| `getPayments(PaymentsListQuery $query)` | GET | `/v1/payments` |
+| `getPayment(int $id)` | GET | `/v1/payments/{id}` |
+| `getDocumentPayments(string $documentType, int $documentId)` | GET | `/v1/{documents}/{id}/payments` |
+| `createPayment(string $documentType, int $documentId, array $data)` | POST | `/v1/{documents}/{id}/payments` |
+| `updatePayment(int $id, array $data)` | PATCH | `/v1/payments/{id}` |
+| `deletePayment(int $id)` | DELETE | `/v1/payments/{id}` |
+
+`$documentType` is one of the `DocumentType` constants: `INVOICE`, `PROFORMA_INVOICE`,
+`CREDIT_NOTE`, `EXPENSE`. The document's payment status is recalculated on every change.
+
+### Items (catalogue) – `$api->itemRepository`
+
+| Method | HTTP | Endpoint |
+|--------|------|----------|
+| `getItems(ItemsListQuery $query)` | GET | `/v1/items` |
+| `getItem(int $id)` | GET | `/v1/items/{id}` |
+| `createItem(array $data)` | POST | `/v1/items` |
+| `updateItem(int $id, array $data)` | PATCH | `/v1/items/{id}` |
+| `deleteItem(int $id)` | DELETE | `/v1/items/{id}` |
+| `getItemUnits()` | GET | `/v1/item-units` |
+| `getTaxes()` | GET | `/v1/taxes` |
+
+### Estimates (price quotes) – `$api->estimateRepository`
+
+| Method | HTTP | Endpoint |
+|--------|------|----------|
+| `getEstimates(EstimatesListQuery $query)` | GET | `/v1/estimates` |
+| `getEstimate(int $id)` | GET | `/v1/estimates/{id}` |
+| `createEstimate(array $data, ?string $idempotencyKey)` | POST | `/v1/estimates` |
+| `updateEstimate(int $id, array $data)` | PATCH | `/v1/estimates/{id}` |
+| `deleteEstimate(int $id)` | DELETE | `/v1/estimates/{id}` |
+| `getEstimatePdf(int $id)` | GET | `/v1/estimates/{id}/pdf` |
+| `sendEstimateEmail(int $id)` | POST | `/v1/estimates/{id}/send-email` |
+| `changeEstimateStatus(int $id, string $status)` | POST | `/v1/estimates/{id}/change-status` |
+
+### Attachments – `$api->attachmentRepository`
+
+| Method | HTTP | Endpoint |
+|--------|------|----------|
+| `uploadAttachment(string $contents, string $filename)` | POST | `/v1/attachments` |
+| `downloadAttachment(string $uuid)` | GET | `/v1/attachments/{uuid}` |
+
+### Document activity – `$api->activityRepository`
+
+| Method | HTTP | Endpoint |
+|--------|------|----------|
+| `getDocumentActivities(string $documentType, int $documentId)` | GET | `/v1/{documents}/{id}/activities` |
+
+The activity history of a single document, as shown on the document in the app.
 
 ---
 
@@ -262,10 +421,23 @@ $api->expenseRepository->getExpenses(new ExpensesListQuery(
 | `sort` | `?string` | Column, prefix `-` for descending (e.g. `-issue_date`) |
 | `perPage` | `?int` | Items per page (max 100) |
 | `page` | `?int` | Page number |
+| `foreignId` | `?string` | Your own reference set on create (e.g. order number) |
+| `foreignSource` | `?string` | Source system of `foreignId` (e.g. `shopify`) |
 
 ### `CreditNotesListQuery` fields
 
 Same as above but without `status`.
+
+### `InvoiceRepeatersListQuery` fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `q` | `?string` | Full-text search (customer name/company) |
+| `customerId` | `?int` | Filter by customer ID |
+| `status` | `?string` | `active` or `inactive` |
+| `sort` | `?string` | Column, prefix `-` for descending (e.g. `-start_at`) |
+| `perPage` | `?int` | Items per page (max 100) |
+| `page` | `?int` | Page number |
 
 ### `CustomersListQuery` fields
 
@@ -273,7 +445,20 @@ Same as above but without `status`.
 
 ### `ExpensesListQuery` fields
 
-`q`, `customerId`, `dateFrom`, `dateTo`, `sort`, `perPage`, `page`.
+`q`, `customerId`, `dateFrom`, `dateTo`, `sort`, `perPage`, `page`, `foreignId`, `foreignSource`.
+
+Estimates accept `foreignId` and `foreignSource` as well.
+
+### Linking documents to your system
+
+Invoices, proforma invoices, credit notes, estimates and expenses accept `foreign_source` + `foreign_id`
+on create and update (not unique — one order can have several documents). They are returned on every
+document and in webhook payloads:
+
+```php
+$api->invoiceRepository->createInvoice([...$payload, 'foreign_source' => 'shopify', 'foreign_id' => 'ORDER-42']);
+$api->invoiceRepository->getInvoices(new InvoicesListQuery(foreignId: 'ORDER-42'));
+```
 
 ---
 
@@ -305,6 +490,20 @@ $response = $api->invoiceRepository->createInvoice([
     ],
 ]);
 ```
+
+#### Payment forms
+
+`payment_form` is required on create and accepts one of:
+
+| Value | Meaning |
+|---|---|
+| `bank_transfer` | Wire transfer — the only form that prints bank details and a QR payment code on the PDF |
+| `cash` | Paid in cash |
+| `payment_card` | Card payment |
+| `cash_on_delivery` | Cash on delivery (*dobierka* / *dobírka*) — collected by the courier on handover |
+| `others` | Anything else |
+
+Any other value is rejected with `422`.
 
 #### Create a document as already paid
 
@@ -395,6 +594,19 @@ $api->invoiceRepository->markInvoiceAsPaid($id, [
 ]);
 ```
 
+### Invoice type
+
+Every invoice exposes `type`: `"automatic"` when it was generated by an [invoice
+repeater](#invoice-repeaters--apiinvoicerepeaterrepository) run, `"manual"` otherwise.
+
+```php
+$invoice = $api->invoiceRepository->getInvoice($id)->getBody()['data'];
+
+if ($invoice['type'] === 'automatic') {
+    // generated by a recurring invoice repeater
+}
+```
+
 ### Convert proforma to invoice
 
 ```php
@@ -412,6 +624,9 @@ $pdf = $api->invoiceRepository->getInvoicePdf(123);
 $pdf = $api->invoiceRepository->getInvoicePdf(123, 'EN'); // SK | EN | CZ
 ```
 
+A language override renders a fresh copy on demand (with the ISDOC XML embedded) and never
+changes the document's own stored PDF. Received credit notes always return the supplier's PDF.
+
 #### Permanent PDF links
 
 Every invoice / proforma / credit-note resource exposes its `uuid` plus two **permanent,
@@ -427,10 +642,97 @@ $invoice['pdf_url'];          // inline view  (…/api/invoices/show/{uuid})
 $invoice['pdf_download_url']; // force download (…/api/invoices/download/{uuid})
 ```
 
-> PDF generation is **asynchronous**. The URLs are stable and returned immediately, but they
-> return `404` until the document's PDF has been generated (typically a second or two after
-> create). Persist the URL and it starts working once generation completes — no need to refetch
-> the resource.
+> PDF generation is **asynchronous**. The URLs are stable and returned immediately; persist one
+> and it keeps working — no need to refetch the resource. For a document created in the last
+> few seconds the request waits up to ~3 seconds for the file; if it is still not ready it answers
+> `404`. Every document resource exposes a `pdf_ready` boolean so you can tell without issuing a
+> request — cap your retries, a document whose generation failed never becomes ready.
+
+### Sending documents (e-mail & Peppol)
+
+```php
+// Like the app: e-mail when the customer has an address, Peppol when the branch has it enabled
+$api->invoiceRepository->sendInvoice($id);
+
+// Pick channels explicitly
+$api->invoiceRepository->sendInvoice($id, ['peppol']);
+$api->invoiceRepository->sendInvoiceToPeppol($id); // strict: 422 if Peppol is not enabled
+
+// Or decide on creation (invoices and credit notes): `send` e-mails, `send_to_peppol` sends via Peppol
+$api->invoiceRepository->createInvoice([...$payload, 'send' => true]);                           // e-mail only
+$api->invoiceRepository->createInvoice([...$payload, 'send_to_peppol' => true]);                 // Peppol only
+$api->invoiceRepository->createInvoice([...$payload, 'send' => true, 'send_to_peppol' => true]); // both
+// send_to_peppol: true → 422 when Peppol is not enabled for the branch or the invoice is scheduled
+
+$invoice = $api->invoiceRepository->getInvoice($id)->getBody()['data'];
+$invoice['peppol']['status'];        // pending | sent | delivered | failed | action_required | …
+$invoice['peppol']['delivered_at'];
+$invoice['peppol']['tdd'];           // Slovak CTC reporting result, when applicable
+$invoice['is_locked'];               // true once submitted — PATCH/DELETE then return 409
+
+// Delivery receipts (short-lived download URLs)
+$api->invoiceRepository->getInvoicePeppolEvidence($id);
+```
+
+#### Scheduled invoices
+
+```php
+$api->invoiceRepository->createInvoice([
+    ...$payload,
+    'is_scheduled' => true,
+    'issue_date'   => '2026-11-01', // must be in the future
+    'send'         => true,         // sent when issued — by e-mail and, like the app, via Peppol
+]);
+
+// Scheduled invoices are hidden from lists unless requested
+$api->invoiceRepository->getInvoices(new InvoicesListQuery(includeScheduled: true));
+```
+
+### Payments
+
+```php
+use Fakturovo\ApiClient\Domain\ValueObject\DocumentType;
+
+$api->paymentRepository->createPayment(DocumentType::INVOICE, $invoiceId, [
+    'method'  => 'bank_transfer',
+    'amount'  => 120.50,
+    'paid_at' => '2026-09-01',
+]);
+
+$api->paymentRepository->createPayment(DocumentType::INVOICE, $invoiceId, [
+    'method'  => 'cash',
+    'pay_all' => true, // settle the remaining amount
+]);
+```
+
+### Attachments
+
+```php
+$uuid = $api->attachmentRepository
+    ->uploadAttachment(file_get_contents('contract.pdf'), 'contract.pdf')
+    ->getBody()['data']['uuid'];
+
+$api->invoiceRepository->createInvoice([...$payload, 'attachment_uuids' => [$uuid]]);
+
+// Expenses carry a single attachment, like in the app (null removes it)
+$api->expenseRepository->createExpense([...$expense, 'attachment_uuid' => $uuid]);
+$api->expenseRepository->updateExpense($expenseId, ['attachment_uuid' => null]);
+```
+
+### Estimates
+
+```php
+$api->estimateRepository->createEstimate([
+    'customer' => ['name' => 'Firma s.r.o.'],
+    'items'    => [['name' => 'Analysis', 'quantity' => 1, 'price' => 300, 'vat_amount' => 20]],
+    'groups'   => [[
+        'name'  => 'Implementation',
+        'items' => [['name' => 'Frontend', 'quantity' => 10, 'price' => 40, 'vat_amount' => 20]],
+    ]],
+]);
+
+$api->estimateRepository->changeEstimateStatus($id, 'approved');
+```
 
 ### Expenses
 
@@ -471,20 +773,68 @@ $api->bankAccountRepository->createBankAccount([
 
 ---
 
+### Webhooks
+
+Webhooks are part of the Premium plan. The account owner sets one HTTPS URL in the app (Settings → API → Webhooks) and gets a signing secret
+(`whsec_…`). Fakturovo then `POST`s every document change to it: `invoice.created`, `payment.added`,
+`invoice.peppol_delivered`, `expense.peppol_received`, … — the full list is in the API documentation.
+
+```php
+use Fakturovo\ApiClient\Webhook\InvalidWebhookSignatureException;
+use Fakturovo\ApiClient\Webhook\WebhookSignature;
+
+$payload = file_get_contents('php://input');            // raw body, before any JSON decoding
+$signature = $_SERVER['HTTP_FAKTUROVO_SIGNATURE'] ?? '';
+
+try {
+    $event = WebhookSignature::constructEvent($payload, $signature, getenv('FAKTUROVO_WEBHOOK_SECRET'));
+} catch (InvalidWebhookSignatureException) {
+    http_response_code(400);
+    exit;
+}
+
+// $event['id'] is stable across retries — skip ids you already processed
+match ($event['type']) {
+    'payment.added' => markOrderPaid($event['data']['invoice']['foreign_id']),
+    'invoice.peppol_delivered' => markDelivered($event['data']['invoice']['id']),
+    default => null,
+};
+
+http_response_code(204);
+```
+
+- `data` holds the document under its type (`invoice`, `proforma_invoice`, `credit_note`, `estimate`,
+  `expense`) in the same shape as the matching `get…()` method, plus `details` (e.g. the payment).
+- Answer `2xx` within 10 seconds and do slow work afterwards. Failed deliveries are retried 7 times over
+  about a day; `410 Gone` or 20 failed deliveries in a row switch the webhook off.
+- Deliveries may arrive out of order and more than once — deduplicate by `$event['id']`.
+- `WebhookSignature::verify()` returns a bool if you only need the check; signatures older than 5 minutes
+  are rejected.
+
 ## Error handling
 
-All API errors throw domain-specific exceptions that extend `FakturvoApiException` (which itself extends `RuntimeException`):
+HTTP error statuses (`4xx`/`5xx`) are returned as responses — check `isSuccessful()` /
+`getStatusCode()` and read `getBody()['message']` / `['errors']`. Transport failures and
+malformed responses throw domain-specific exceptions extending `FakturvoApiException`
+(itself a `RuntimeException`); an exhausted monthly plan quota throws `QuotaExceededException`.
 
 | Exception class | Thrown by |
 |-----------------|-----------|
 | `CustomerException` | Customer repository |
 | `InvoiceException` | Invoice repository |
+| `InvoiceRepeaterException` | Invoice repeater repository |
 | `ProformaInvoiceException` | Proforma invoice repository |
 | `CreditNoteException` | Credit note repository |
 | `ExpenseException` | Expense repository |
 | `BankAccountException` | Bank account repository |
 | `NumberSeriesException` | Number series repository |
-| `AccountException` | Account repository (`me()`) |
+| `AccountException` | Account repository (`me()`, `getSubscription()`) |
+| `PaymentException` | Payment repository |
+| `ItemException` | Item repository |
+| `EstimateException` | Estimate repository |
+| `AttachmentException` | Attachment repository |
+| `ActivityException` | Activity repository |
+| `QuotaExceededException` | Any call, when the monthly plan quota is used up |
 
 ```php
 use Fakturovo\ApiClient\Infrastructure\Fakturovo\Exception\InvoiceException;
@@ -514,18 +864,25 @@ src/
 ├── Domain/
 │   ├── Query/                             # Typed list query DTOs
 │   │   ├── InvoicesListQuery.php
+│   │   ├── InvoiceRepeatersListQuery.php
 │   │   ├── ProformaInvoicesListQuery.php
 │   │   ├── CreditNotesListQuery.php
 │   │   ├── CustomersListQuery.php
 │   │   ├── ExpensesListQuery.php
-│   │   └── NumberSeriesListQuery.php
+│   │   ├── NumberSeriesListQuery.php
+│   │   ├── PaymentsListQuery.php
+│   │   ├── ItemsListQuery.php
+│   │   └── EstimatesListQuery.php
 │   ├── Repository/                        # Repository interfaces (contracts)
 │   ├── Response/                          # Response DTOs & mappers
-│   └── ValueObject/                       # Uri, HttpMethod, AuthHeader
+│   └── ValueObject/                       # Uri, HttpMethod, AuthHeader, DocumentType, RateLimit
+├── Webhook/
+│   ├── WebhookSignature.php               # Verify Fakturovo-Signature, decode the event
+│   └── InvalidWebhookSignatureException.php
 └── Infrastructure/
     ├── Api/
     │   ├── ApiRequestFactory.php          # Builds authenticated PSR-7 requests
-    │   └── RetryableHttpClient.php        # 429 retry + PSR-3 logging wrapper
+    │   └── RetryableHttpClient.php        # burst-limit 429 retry + PSR-3 logging wrapper
     └── Fakturovo/
         ├── Exception/                     # Domain-specific exceptions
         └── Repository/                    # Concrete repository implementations

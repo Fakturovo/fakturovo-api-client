@@ -24,6 +24,22 @@ final class Uri
         return new self('https://api.fakturovo.sk/api/public');
     }
 
+    /**
+     * Any other API host, e.g. a staging or local environment:
+     * Uri::custom('https://staging.fakturovo.sk/api/public').
+     */
+    public static function custom(string $value): self
+    {
+        $value = rtrim($value, '/');
+        $scheme = parse_url($value, PHP_URL_SCHEME);
+
+        if (filter_var($value, FILTER_VALIDATE_URL) === false || !in_array($scheme, ['http', 'https'], true)) {
+            throw new InvalidArgumentException("Argument: [$value] is not a valid http(s) uri.");
+        }
+
+        return new self($value);
+    }
+
     public static function createFromString(string $value): self
     {
         if (!in_array($value, self::SUPPORTED, true)) {

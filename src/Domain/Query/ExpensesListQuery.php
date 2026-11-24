@@ -14,6 +14,9 @@ final class ExpensesListQuery
         public ?string $sort = null,
         public ?int $perPage = null,
         public ?int $page = null,
+        public ?string $type = null,
+        public ?string $foreignId = null,
+        public ?string $foreignSource = null,
     ) {
     }
 
@@ -28,6 +31,9 @@ final class ExpensesListQuery
             'sort' => $this->sort,
             'per_page' => $this->perPage,
             'page' => $this->page,
+            'type' => $this->type,
+            'foreign_id' => $this->foreignId,
+            'foreign_source' => $this->foreignSource,
         ], fn (mixed $v) => $v !== null);
     }
 }

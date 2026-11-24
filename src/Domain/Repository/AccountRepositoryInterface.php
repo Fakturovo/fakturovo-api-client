@@ -15,4 +15,10 @@ interface AccountRepositoryInterface
      * @see https://api.fakturovo.sk/docs/api#/operations/me.getMe
      */
     public function me(): DomainResponseInterface;
+
+    /**
+     * Subscription plan, enabled features, plan limits with current usage and API quota.
+     * @see https://api.fakturovo.sk/docs/api#/operations/account.getSubscription
+     */
+    public function getSubscription(): DomainResponseInterface;
 }

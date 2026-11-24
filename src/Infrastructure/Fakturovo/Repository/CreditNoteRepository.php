@@ -128,4 +128,36 @@ final class CreditNoteRepository extends AbstractRepository implements CreditNot
             throw CreditNoteException::failedToGetPdf($id, $e);
         }
     }
+
+    public function sendCreditNote(int $id, ?array $channels = null): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_POST, '/v1/credit-notes/' . $id . '/send', $channels === null ? [] : ['channels' => $channels]),
+            fn (\Throwable $e) => CreditNoteException::failed("send credit note [{$id}]", $e),
+        );
+    }
+
+    public function sendCreditNoteEmail(int $id): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_POST, '/v1/credit-notes/' . $id . '/send-email'),
+            fn (\Throwable $e) => CreditNoteException::failed("e-mail credit note [{$id}]", $e),
+        );
+    }
+
+    public function sendCreditNoteToPeppol(int $id): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_POST, '/v1/credit-notes/' . $id . '/send-to-peppol'),
+            fn (\Throwable $e) => CreditNoteException::failed("send credit note [{$id}] to Peppol", $e),
+        );
+    }
+
+    public function getCreditNotePeppolEvidence(int $id): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_GET, '/v1/credit-notes/' . $id . '/peppol-evidence'),
+            fn (\Throwable $e) => CreditNoteException::failed("get Peppol evidence of credit note [{$id}]", $e),
+        );
+    }
 }

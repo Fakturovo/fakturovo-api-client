@@ -103,4 +103,20 @@ final class ExpenseRepository extends AbstractRepository implements ExpenseRepos
             throw ExpenseException::failedToDelete($id, $e);
         }
     }
+
+    public function getExpensePeppolEvidence(int $id): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_GET, '/v1/expenses/' . $id . '/peppol-evidence'),
+            fn (\Throwable $e) => ExpenseException::failed("get Peppol evidence of expense [{$id}]", $e),
+        );
+    }
+
+    public function getExpenseCategories(): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_GET, '/v1/expenses/categories'),
+            fn (\Throwable $e) => ExpenseException::failed('list expense categories', $e),
+        );
+    }
 }

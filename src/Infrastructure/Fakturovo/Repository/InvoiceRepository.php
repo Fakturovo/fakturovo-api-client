@@ -180,4 +180,28 @@ final class InvoiceRepository extends AbstractRepository implements InvoiceRepos
             throw InvoiceException::failedToMarkAsPaid($id, $e);
         }
     }
+
+    public function sendInvoice(int $id, ?array $channels = null): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_POST, '/v1/invoices/' . $id . '/send', $channels === null ? [] : ['channels' => $channels]),
+            fn (\Throwable $e) => InvoiceException::failed("send invoice [{$id}]", $e),
+        );
+    }
+
+    public function sendInvoiceToPeppol(int $id): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_POST, '/v1/invoices/' . $id . '/send-to-peppol'),
+            fn (\Throwable $e) => InvoiceException::failed("send invoice [{$id}] to Peppol", $e),
+        );
+    }
+
+    public function getInvoicePeppolEvidence(int $id): DomainResponseInterface
+    {
+        return $this->send(
+            $this->jsonRequest(HttpMethod::HTTP_METHOD_GET, '/v1/invoices/' . $id . '/peppol-evidence'),
+            fn (\Throwable $e) => InvoiceException::failed("get Peppol evidence of invoice [{$id}]", $e),
+        );
+    }
 }
